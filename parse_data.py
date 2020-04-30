@@ -2,7 +2,7 @@ import sqlite3
 import json
 from enum import Enum
 
-comment_dump = "/home/jonas/Development/reddit_comment_dump/RC_2015-12"
+comment_dump = "/home/jonas/Development/reddit_comment_dump/RC_2008-07"
 db_conn = sqlite3.connect("comment_data.sqlite")
 index = 0
 
@@ -31,37 +31,45 @@ def create_database():
     """)
     c.close()
 
+def format_body(body):
+    body = body.replace("\n"," newlinechar ").replace("\r"," newlinechar ").replace("'",'"')
+    return body
+
 def insert_comment(comment):
     c = db_conn.cursor()
     if (get_comment_type(comment) == Comment_type.PARENT):
-        c.execute("INSERT INTO comments (parent_id, comment_id, parent_body) VALUES (?,?,?)",comment["parent_id"],comment["comment_id"],comment["body"])
+        c.execute("INSERT INTO comments (parent_id, comment_id, parent_body) VALUES (?,?,?)",comment["parent_id"],comment["id"],format_body(comment["body"]))
     else:
         if (is_highest_score_reply(comment)):
-            c.execute("INSERT INTO comments (parent_id, comment_id, reply_score, reply_body) VALUES (?,?,?,?)",comment["parent_id"],comment["comment_id"],comment["score"],comment["body"])
+            c.execute("INSERT INTO comments (parent_id, reply_id, reply_score, reply_body) VALUES (?,?,?,?)",(comment["parent_id"],comment["id"],comment["score"],format_body(comment["body"]),))
 
 def update_comment(comment):
     c = db_conn.cursor()
     if (get_comment_type(comment) == Comment_type.PARENT):
-        c.execute("UPDATE comments SET parent_body = '?' WHERE parent_id = '?'",comment["body"],comment["comment_id"])
+        c.execute("UPDATE comments SET parent_body = ? WHERE parent_id = ?",format_body(comment["body"]),comment["id"])
     else:
-        c.execute("UPDATE comments SET reply_body = '?' WHERE parent_id = '?'",(comment["body"],comment["parent_id"],))
+        c.execute("UPDATE comments SET reply_body = ?, reply_score = ?, reply_id = ? WHERE parent_id = ?",(format_body(comment["body"]),comment["score"],comment["id"],comment["parent_id"],))
 
 def comment_exists_in_db(comment):
     if (get_comment_type(comment) == Comment_type.PARENT):
-        field_name = "comment_id"
+        field_name = "id"
     else:
         field_name = "parent_id"
 
     c = db_conn.cursor()
     c.execute("SELECT COUNT(*) FROM comments WHERE parent_id = ?",(comment[field_name],))
     num_in_db = c.fetchone()
-    return bool(num_in_db)
+    if num_in_db is None:
+        return False
+    return bool(num_in_db[0])
 
 def is_highest_score_reply(comment):
     c = db_conn.cursor()
-    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", comment["parent_id"],)
+    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", (comment["parent_id"],))
     score_from_db = c.fetchone()
-    if comment["score"] > score_from_db:
+    if score_from_db is None:
+        return True
+    if comment["score"] > int(score_from_db):
         return True
     else:
         return False
@@ -72,7 +80,7 @@ def verify_and_insert(comment):
         if (comment_exists_in_db(comment)):
             update_comment(comment)
         else:
-            insert_comment(commetn)
+            insert_comment(comment)
 
 create_database()
 
@@ -80,20 +88,8 @@ with open (comment_dump) as f:
     for row in f:
         index += 1
         comment = json.loads(row)
-        # Which fields are important?
-        # - body, which the actual body of the comment
-        # - score, we don't want comments that are too low rated
-        # - parent_id
-        # - id
-        # - subreddit_id, if it's the same as parent_id, then it's a top level comment
         verify_and_insert(comment)
 
-        if index >= 500:
+        if index >= 10000:
             break
-
-# INSERT INTO comments (parent_id, comment_id, reply) VALUES (?,?,?)
-# INSERT INTO comments (parent_id, comment_id, parent) VALUES (?,?,?)
-
-#if extits in db: update, else insert
-# one function for each,
-# format sql query with .format, depening on if it's parent or reply
+    db_conn.commit()
