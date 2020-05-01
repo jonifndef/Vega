@@ -18,12 +18,22 @@ def get_comment_type(comment):
 
 def create_database():
     c = db_conn.cursor()
+    #c.execute("""
+    #    CREATE TABLE IF NOT EXISTS comments
+    #    (
+    #        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    #        parent_id TEXT DEFAULT "",
+    #        reply_id TEXT DEFAULT "",
+    #        reply_score INTEGER DEFAULT -1,
+    #        parent_body TEXT DEFAULT "",
+    #        reply_body TEXT DEFAULT ""
+    #    )
+    #""")
     c.execute("""
         CREATE TABLE IF NOT EXISTS comments
         (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             parent_id TEXT DEFAULT "",
-            reply_id TEXT DEFAULT "",
             reply_score INTEGER DEFAULT -1,
             parent_body TEXT DEFAULT "",
             reply_body TEXT DEFAULT ""
@@ -32,7 +42,7 @@ def create_database():
     c.close()
 
 def format_body(body):
-    body = body.replace("\n"," newlinechar ").replace("\r"," newlinechar ").replace("'",'"')
+    body = body.replace("\n"," newlinechar ").replace("\r"," newlinechar ").replace('"',"'")
     return body
 
 def insert_comment(comment):
@@ -74,22 +84,110 @@ def is_highest_score_reply(comment):
     else:
         return False
 
+### New functions ###
+
+def reply_exists(comment):
+    c = db_conn.cursor()
+    c.execute("SELECT CASE WHEN parent_id = ? THEN 1 ELSE 0 END FROM comments", (comment["id"],))
+    reply_exists = c.fetchone()
+    if (reply_exists is None):
+        return False
+    elif (bool(reply_exists[0])):
+        return True
+    else:
+        return False
+
+def insert_on_reply_row(comment):
+    c = db_conn.cursor()
+    c.execute("UPDATE comments SET parent = ? WHERE parent_id = ?", (format_body(comment["body"]),comment["id"],))
+
+def insert_as_new_parent(comment):
+    c = db_conn.cursor()
+    c.execute("INSERT INTO comments (parent_id, parent_body) VALUES (?,?)", (comment["id"],format_body(comment["body"]),))
+
+def comment_with_same_parent_exits(comment):
+    c = db_conn.cursor()
+    c.execute("SELECT CASE WHEN parent_id = ? THEN 1 ELSE 0 END FROM comments", (comment["parent_id"],))
+    comment_exists = c.fetchone()
+    if (comment_exists is None):
+        return False
+    elif (bool(comment_exists[0])):
+        return True
+    else:
+        return False
+
+def has_higher_score_than_existing(comment):
+    c = db_conn.cursor()
+    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", (comment["parent_id"],))
+    score_from_db = c.fetchone()
+    if score_from_db is None:
+        return True
+    if comment["score"] > int(score_from_db):
+        return True
+    else:
+        return False
+
+def update_reply(comment):
+    c = db_conn.cursor()
+    c.execute("UPDATE comments SET reply_body = ?, reply_score = ? WHERE parent_id = ?",(format_body(comment["body"]),comment["score"],comment["parent_id"],))
+
+def insert_as_new_reply(comment):
+    c = db_conn.cursor()
+    c.execute("INSERT INTO comments (parent_id, reply_score, reply_body) VALUES (?,?,?)", (comment["parent_id"],comment["score"],format_body(comment["body"]),))
+
 def verify_and_insert(comment):
-    if (comment["score"] >= 2):
+    if (comment["score"] >= 2 and comment["body"] != "[deleted]"):
         # We potentially want to check for other things in the future
-        if (comment_exists_in_db(comment)):
-            update_comment(comment)
+        #if (comment_exists_in_db(comment)):
+        #    print("updating existing row")
+        #    update_comment(comment)
+        #else:
+        #    insert_comment(comment)
+        if (reply_exists(comment)):
+            insert_on_reply_row(comment)
         else:
-            insert_comment(comment)
+            insert_as_new_parent(comment)
+        if (comment_with_same_parent_exits(comment)):
+            if (has_higher_score_than_existing(comment)):
+                update_reply(comment)
+        else:
+            insert_as_new_reply(comment)
 
 create_database()
-
 with open (comment_dump) as f:
     for row in f:
         index += 1
         comment = json.loads(row)
         verify_and_insert(comment)
-
-        if index >= 10000:
-            break
+        #if index >= 1000000000:
+        #    break
     db_conn.commit()
+
+#   get comment
+#   if another comment is a reply to this one, this comment_id will be an existing parent_id in the db
+#       if so, insert this as parent
+#       if not, it can still be a parent, only we havn't got any replies to it yet
+#       maybe insert as parent, with it's comment_id as the parent_id?
+#
+#   if another comment in database has the same parent_id as this current comment,
+#       does the current one have a higher score than one already in the db?
+#           if so, replace the existing one with the current one
+#       otherwise, do nothing
+#   otherwise, insert this new one as a reply with it's parent_id as the parent_id of the row
+#
+#   Two scenarios: insert it as a reply, because it has a parent_id of some sort.
+#       Then, everytime we insert a new
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
