@@ -5,6 +5,7 @@ from enum import Enum
 comment_dump = "/home/jonas/Development/reddit_comment_dump/RC_2008-07"
 db_conn = sqlite3.connect("comment_data.sqlite")
 index = 0
+paired_rows = 0
 
 class Comment_type(Enum):
     PARENT = 1
@@ -147,26 +148,49 @@ def comment_is_corrent_len(comment):
 def get_parent_body(comment):
     c = db_conn.cursor()
     # is this really correct? Selecting "reply"?
-    c.execute("SELECT reply FROM comments WHERE reply_id = ?", comment["parent_id"],)
+    c.execute("SELECT reply_body FROM comments WHERE reply_id = ?", (comment["parent_id"],))
     parent_body = c.fetchone()
     if parent_body != None:
         return parent_body[0]
     else:
-        return False
+        return ""
 
 def find_existing_score(comment):
     c = db_conn.cursor()
-    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", comment["parent_id"],)
+    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", (comment["parent_id"],))
     score = c.fetchone()
     if score != None:
         return score[0]
     else:
         return False
 
+def sql_insert_replace_comment(comment, parent_body):
+    c = db_conn.cursor()
+    c.execute("""
+        UPDATE comments
+            SET parent_id = ?, reply_id = ?, parent_body = ?, reply_body = ?, reply_score = ?
+        WHERE parent_id = ?
+        """, (comment["parent_id"], comment["name"], format_body(parent_body), format_body(comment["body"]), comment["score"], comment["parent_id"],))
+
+def sql_insert_has_parent(comment, parent_body):
+    c = db_conn.cursor()
+    c.execute("""
+        INSERT INTO comments (parent_id, reply_id, parent_body, reply_body, reply_score)
+        VALUES (?,?,?,?,?)
+        """, (comment["parent_id"], comment["name"], format_body(parent_body), format_body(comment["body"]), comment["score"],))
+
+def sql_insert_no_parent(comment):
+    c = db_conn.cursor()
+    c.execute("""
+        INSERT INTO comments (parent_id, reply_id, reply_body, reply_score)
+        VALUES (?,?,?,?)
+    """, (comment["parent_id"], comment["name"], format_body(comment["body"]), comment["score"],))
+
 def verify_and_insert(comment):
-    paired_rows = 0
+    global paired_rows
     parent_body = get_parent_body(comment)
     if (comment["score"] >= 2 and comment["body"] != "[deleted]" and comment_is_corrent_len(comment)):
+        ### First way, tried to only use root comments, bad idea ### ###
         # We potentially want to check for other things in the future
         #if (comment_exists_in_db(comment)):
         #    print("updating existing row")
@@ -174,6 +198,7 @@ def verify_and_insert(comment):
         #else:
         #    insert_comment(comment)
 
+        ### second way, didn't work but we used the wrong comment id, right? Might've worked otherwise ###
         #if (reply_exists(comment)):
         #    insert_on_reply_row(comment)
         #else:
@@ -184,26 +209,17 @@ def verify_and_insert(comment):
         #else:
         #    insert_as_new_reply(comment)
 
+        ### Thrid way ###
         existing_comment_score = find_existing_score(comment)
         if existing_comment_score:
             if comment["score"] > existing_comment_score:
-                sql_insert_replace_comment()
+                sql_insert_replace_comment(comment, parent_body)
         else:
-            if parent_data:
-                sql_insert_has_parent()
+            if parent_body:
+                sql_insert_has_parent(comment, parent_body)
                 paired_rows += 1
-            else
-                sql_insert_no_parent()
-
-create_database()
-with open (comment_dump) as f:
-    for row in f:
-        index += 1
-        comment = json.loads(row)
-        verify_and_insert(comment)
-        #if index >= 1000000000:
-        #    break
-    db_conn.commit()
+            else:
+                sql_insert_no_parent(comment)
 
 #   get comment
 #   if another comment is a reply to this one, this comment_id will be an existing parent_id in the db
@@ -219,17 +235,15 @@ with open (comment_dump) as f:
 #
 #   Two scenarios: insert it as a reply, because it has a parent_id of some sort.
 #       Then, everytime we insert a new
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+create_database()
+with open (comment_dump) as f:
+    for row in f:
+        index += 1
+        comment = json.loads(row)
+        verify_and_insert(comment)
+        if (index % 1000 == 0):
+            print("Num rows done: {}, num paired comments: {}".format(index, paired_rows))
+        if index >= 20000:
+            break
+    db_conn.commit()
+    print("paired rows: {}".format(paired_rows))
