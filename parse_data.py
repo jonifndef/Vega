@@ -18,27 +18,27 @@ def get_comment_type(comment):
 
 def create_database():
     c = db_conn.cursor()
-    #c.execute("""
-    #    CREATE TABLE IF NOT EXISTS comments
-    #    (
-    #        id INTEGER PRIMARY KEY AUTOINCREMENT,
-    #        parent_id TEXT DEFAULT "",
-    #        reply_id TEXT DEFAULT "",
-    #        reply_score INTEGER DEFAULT -1,
-    #        parent_body TEXT DEFAULT "",
-    #        reply_body TEXT DEFAULT ""
-    #    )
-    #""")
     c.execute("""
         CREATE TABLE IF NOT EXISTS comments
         (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             parent_id TEXT DEFAULT "",
+            reply_id TEXT DEFAULT "",
             reply_score INTEGER DEFAULT -1,
             parent_body TEXT DEFAULT "",
             reply_body TEXT DEFAULT ""
         )
     """)
+    #c.execute("""
+    #    CREATE TABLE IF NOT EXISTS comments
+    #    (
+    #        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    #        parent_id TEXT DEFAULT "",
+    #        reply_score INTEGER DEFAULT -1,
+    #        parent_body TEXT DEFAULT "",
+    #        reply_body TEXT DEFAULT ""
+    #    )
+    #""")
     c.close()
 
 def format_body(body):
@@ -135,23 +135,65 @@ def insert_as_new_reply(comment):
     c = db_conn.cursor()
     c.execute("INSERT INTO comments (parent_id, reply_score, reply_body) VALUES (?,?,?)", (comment["parent_id"],comment["score"],format_body(comment["body"]),))
 
+### new again ###
+
+def comment_is_corrent_len(comment):
+    body_string = format_body(comment["body"])
+    if (len(body_string.split(" ")) > 50 or (len(body_string) < 1) or (len(body_string) > 1000)):
+        return False
+    else:
+        return True
+
+def get_parent_body(comment):
+    c = db_conn.cursor()
+    # is this really correct? Selecting "reply"?
+    c.execute("SELECT reply FROM comments WHERE reply_id = ?", comment["parent_id"],)
+    parent_body = c.fetchone()
+    if parent_body != None:
+        return parent_body[0]
+    else:
+        return False
+
+def find_existing_score(comment):
+    c = db_conn.cursor()
+    c.execute("SELECT reply_score FROM comments WHERE parent_id = ?", comment["parent_id"],)
+    score = c.fetchone()
+    if score != None:
+        return score[0]
+    else:
+        return False
+
 def verify_and_insert(comment):
-    if (comment["score"] >= 2 and comment["body"] != "[deleted]"):
+    paired_rows = 0
+    parent_body = get_parent_body(comment)
+    if (comment["score"] >= 2 and comment["body"] != "[deleted]" and comment_is_corrent_len(comment)):
         # We potentially want to check for other things in the future
         #if (comment_exists_in_db(comment)):
         #    print("updating existing row")
         #    update_comment(comment)
         #else:
         #    insert_comment(comment)
-        if (reply_exists(comment)):
-            insert_on_reply_row(comment)
+
+        #if (reply_exists(comment)):
+        #    insert_on_reply_row(comment)
+        #else:
+        #    insert_as_new_parent(comment)
+        #if (comment_with_same_parent_exits(comment)):
+        #    if (has_higher_score_than_existing(comment)):
+        #        update_reply(comment)
+        #else:
+        #    insert_as_new_reply(comment)
+
+        existing_comment_score = find_existing_score(comment)
+        if existing_comment_score:
+            if comment["score"] > existing_comment_score:
+                sql_insert_replace_comment()
         else:
-            insert_as_new_parent(comment)
-        if (comment_with_same_parent_exits(comment)):
-            if (has_higher_score_than_existing(comment)):
-                update_reply(comment)
-        else:
-            insert_as_new_reply(comment)
+            if parent_data:
+                sql_insert_has_parent()
+                paired_rows += 1
+            else
+                sql_insert_no_parent()
 
 create_database()
 with open (comment_dump) as f:
